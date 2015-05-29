@@ -306,7 +306,7 @@ EM_BUILD_VERBOSE_LEVEL = int(os.getenv('EM_BUILD_VERBOSE')) if os.getenv('EM_BUI
 
 # Expectations
 
-EXPECTED_LLVM_VERSION = (3, 6)
+EXPECTED_LLVM_VERSION = (3, 7)
 
 actual_clang_version = None
 
@@ -1012,6 +1012,7 @@ class Building:
     env['PKG_CONFIG_PATH'] = os.environ.get ('EM_PKG_CONFIG_PATH') or ''
     env['EMSCRIPTEN'] = path_from_root()
     env['PATH'] = path_from_root('system', 'bin') + os.pathsep + env['PATH']
+    env['CROSS_COMPILE'] = path_from_root('em') # produces /path/to/emscripten/em , which then can have 'cc', 'ar', etc appended to it
     return env
 
   # Finds the given executable 'program' in PATH. Operates like the Unix tool 'which'.
@@ -1537,7 +1538,7 @@ class Building:
 
   @staticmethod
   def can_build_standalone():
-    return not Settings.BUILD_AS_SHARED_LIB and not Settings.LINKABLE and not Settings.EXPORT_ALL
+    return not Settings.BUILD_AS_SHARED_LIB and not Settings.LINKABLE and not Settings.EXPORT_ALL and not Settings.MAIN_MODULE and not Settings.SIDE_MODULE
 
   @staticmethod
   def can_inline():
@@ -1568,9 +1569,6 @@ class Building:
     if optimization_level > 0:
       if not Building.can_inline():
         opts.append('-disable-inlining')
-      if not Building.can_build_standalone():
-        # -O1 does not have -gobaldce, which removes stuff that is needed for libraries and linkables
-        optimization_level = min(1, optimization_level)
       opts.append('-O%d' % optimization_level)
     Building.LLVM_OPT_OPTS = opts
     return opts
@@ -1874,8 +1872,8 @@ def safe_move(src, dst):
   dst = os.path.abspath(dst)
   if os.path.isdir(dst):
     dst = os.path.join(dst, os.path.basename(src))
-  if src == dst:
-    return
+  if src == dst: return
+  if dst == '/dev/null': return
   shutil.move(src, dst)
 
 def safe_copy(src, dst):
@@ -1883,8 +1881,8 @@ def safe_copy(src, dst):
   dst = os.path.abspath(dst)
   if os.path.isdir(dst):
     dst = os.path.join(dst, os.path.basename(src))
-  if src == dst:
-    return
+  if src == dst: return
+  if dst == '/dev/null': return
   shutil.copyfile(src, dst)
 
 import js_optimizer

@@ -433,6 +433,13 @@ function allocate(slab, types, allocator, ptr) {
 }
 Module['allocate'] = allocate;
 
+// Allocate memory during any stage of startup - static memory early on, dynamic memory later, malloc when ready
+function getMemory(size) {
+  if (!staticSealed) return Runtime.staticAlloc(size);
+  if (typeof _sbrk !== 'undefined' && !_sbrk.called) return Runtime.dynamicAlloc(size);
+  return _malloc(size);
+}
+
 function Pointer_stringify(ptr, /* optional */ length) {
   if (length === 0 || !ptr) return '';
   // TODO: use TextDecoder
@@ -1366,6 +1373,17 @@ var dependenciesFulfilled = null; // overridden to take different actions when a
 var runDependencyTracking = {};
 #endif
 
+function getUniqueRunDependency(id) {
+#if ASSERTIONS
+  var orig = id;
+  while (1) {
+    if (!runDependencyTracking[id]) return id;
+    id = orig + Math.random();
+  }
+#endif
+  return id;
+}
+
 function addRunDependency(id) {
   runDependencies++;
   if (Module['monitorRunDependencies']) {
@@ -1445,8 +1463,40 @@ var PGOMonitor = {
   }
 };
 Module['PGOMonitor'] = PGOMonitor;
-__ATEXIT__.push({ func: function() { PGOMonitor.dump() } });
+__ATEXIT__.push(function() { PGOMonitor.dump() });
 addOnPreRun(function() { addRunDependency('pgo') });
+#endif
+
+#if RELOCATABLE
+{{{
+(function() {
+  // add in RUNTIME_LINKED_LIBS, if provided
+  if (RUNTIME_LINKED_LIBS.length > 0) {
+    return "if (!Module['dynamicLibraries']) Module['dynamicLibraries'] = [];\n" +
+           "Module['dynamicLibraries'] = " + JSON.stringify(RUNTIME_LINKED_LIBS) + ".concat(Module['dynamicLibraries']);\n";
+  }
+  return '';
+})()
+}}}
+
+addOnPreRun(function() {
+  if (Module['dynamicLibraries']) {
+    Module['dynamicLibraries'].forEach(function(lib) {
+      Runtime.loadDynamicLibrary(lib);
+    });
+  }
+  asm['runPostSets']();
+});
+
+#if ASSERTIONS
+function lookupSymbol(ptr) { // for a pointer, print out all symbols that resolve to it
+  var ret = [];
+  for (var i in Module) {
+    if (Module[i] === ptr) ret.push(i);
+  }
+  print(ptr + ' is ' + ret);
+}
+#endif
 #endif
 
 var memoryInitializer = null;
